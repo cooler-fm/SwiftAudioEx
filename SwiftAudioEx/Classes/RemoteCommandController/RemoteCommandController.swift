@@ -174,6 +174,11 @@ public class RemoteCommandController {
             player.next()
             return MPRemoteCommandHandlerStatus.success
         }
+				else if let player = audioPlayer as? CoolerAVPlayer {
+					if let workaround = player.workaroundSeekForward {
+						workaround()
+					}
+			  }
         return MPRemoteCommandHandlerStatus.commandFailed
     }
     
@@ -182,6 +187,11 @@ public class RemoteCommandController {
             player.previous()
             return MPRemoteCommandHandlerStatus.success
         }
+				else if let player = audioPlayer as? CoolerAVPlayer {
+					if let workaround = player.workaroundSeekBackward {
+						workaround()
+					}
+				}
         return MPRemoteCommandHandlerStatus.commandFailed
     }
     
