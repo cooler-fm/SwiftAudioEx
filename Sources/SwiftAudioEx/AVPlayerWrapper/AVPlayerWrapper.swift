@@ -352,6 +352,7 @@ class AVPlayerWrapper: AVPlayerWrapperProtocol {
 
     func unload() {
         clearCurrentItem()
+        url = nil
         state = .idle
     }
 
