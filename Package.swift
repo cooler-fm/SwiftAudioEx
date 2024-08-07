@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "SwiftAudioEx",
-    platforms: [.iOS(.v11)],
+    platforms: [.iOS(.v11), .macOS(.v11)],
     products: [
         .library(
             name: "SwiftAudioEx",
@@ -13,7 +13,13 @@ let package = Package(
     targets: [
         .target(
             name: "SwiftAudioEx",
-            dependencies: [],
-            path: "SwiftAudioEx/Classes")
+            dependencies: []),
+        .testTarget(
+            name: "SwiftAudioExTests",
+            dependencies: ["SwiftAudioEx"],
+            resources: [
+                .process("Resources")
+            ]
+        ),
     ]
 )
