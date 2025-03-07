@@ -7,6 +7,10 @@
 
 import SwiftUI
 import SwiftAudioEx
+import AVFoundation
+
+let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+let destinationURL = documentsDir.appendingPathComponent("downloads/my-audio.mp3")
 
 struct PlayerView: View {
     @ObservedObject var viewModel: ViewModel
@@ -22,6 +26,14 @@ struct PlayerView: View {
         VStack(spacing: 0) {
             HStack(alignment: .center) {
                 Spacer()
+							Button {
+								print("try to remove the file: \(destinationURL.path)")
+								try? FileManager.default.removeItem(at: destinationURL)
+							} label: {
+								Text("Delete the local file")
+							}
+							
+							
                 Button(action: { showingQueue.toggle() }, label: {
                     Text("Queue")
                         .fontWeight(.bold)
@@ -81,17 +93,22 @@ struct PlayerView: View {
             } 
 
             HStack {
-                Button(action: controller.player.previous, label: {
-                    Text("Prev")
-                        .font(.system(size: 14))
-                })
-                .frame(maxWidth: .infinity)
+//                Button(action: controller.player.previous, label: {
+//                    Text("Prev")
+//                        .font(.system(size: 14))
+//                })
+//                .frame(maxWidth: .infinity)
 
                 Button(action: {
                     if viewModel.playing {
                         controller.player.pause()
                     } else {
-                        controller.player.play()
+											// Load and download
+											controller.player.loadAndDownload(
+												item: downloadSource,
+												destinationURL: destinationURL,
+												playWhenReady: true
+											)
                     }
                 }, label: {
                     Text(!viewModel.playWhenReady || viewModel.playbackState == .failed ? "Play" : "Pause")
@@ -100,11 +117,11 @@ struct PlayerView: View {
                 })
 
                 .frame(maxWidth: .infinity)
-                Button(action: controller.player.next, label: {
-                    Text("Next")
-                        .font(.system(size: 14))
-                })
-                .frame(maxWidth: .infinity)
+//                Button(action: controller.player.next, label: {
+//                    Text("Next")
+//                        .font(.system(size: 14))
+//                })
+//                .frame(maxWidth: .infinity)
             }
             .padding(.top, 80)
 
@@ -133,6 +150,8 @@ struct PlayerView: View {
         .padding(.horizontal, 16)
         .padding(.top)
     }
+	
+	
 }
 
 #Preview("Standard") {

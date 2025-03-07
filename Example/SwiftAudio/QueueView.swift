@@ -16,22 +16,22 @@ struct QueueView: View {
         NavigationStack {
             VStack {
                 List {
-                    if controller.player.currentItem != nil {
+									if controller.player.playerState == .playing {
                         Section(header: Text("Playing Now")) {
-                            QueueItemView(
-                                title: controller.player.currentItem?.getTitle() ?? "",
-                                artist: controller.player.currentItem?.getArtist() ?? ""
-                            )
+//                            QueueItemView(
+//                                title: controller.player.currentItem?.getTitle() ?? "",
+//                                artist: controller.player.currentItem?.getArtist() ?? ""
+//                            )
                         }
                     }
-                    Section(header: Text("Up Next")) {
-                        ForEach(controller.player.nextItems as! [DefaultAudioItem]) { item in
-                            QueueItemView(
-                                title: item.getTitle() ?? "",
-                                artist: item.getArtist() ?? ""
-                            )
-                        }
-                    }
+//                    Section(header: Text("Up Next")) {
+//                        ForEach(controller.player.nextItems as! [DefaultAudioItem]) { item in
+//                            QueueItemView(
+//                                title: item.getTitle() ?? "",
+//                                artist: item.getArtist() ?? ""
+//                            )
+//                        }
+//                    }
                 }
             }
             .navigationTitle("Queue")

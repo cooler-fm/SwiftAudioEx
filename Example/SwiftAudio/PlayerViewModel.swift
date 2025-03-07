@@ -58,15 +58,8 @@ extension PlayerView {
                 playWhenReady = controller.player.playWhenReady
                 position = controller.player.currentTime
                 maxTime = controller.player.duration
-                artist = controller.player.currentItem?.getArtist() ?? ""
-                title = controller.player.currentItem?.getTitle() ?? ""
                 elapsedTime = controller.player.currentTime.secondsToString()
                 remainingTime = (controller.player.duration - controller.player.currentTime).secondsToString()
-                if let item = controller.player.currentItem as? DefaultAudioItem {
-                    artwork = item.artwork
-                } else {
-                    artwork = nil
-                }
             }
         }
 
