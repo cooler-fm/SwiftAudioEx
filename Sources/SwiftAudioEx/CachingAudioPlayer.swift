@@ -62,6 +62,9 @@ public class CachingAudioPlayer: AudioPlayer {
 	}
 	
 	// MARK: - Public Methods
+	public var workaroundSeekForward: (() -> Void)?
+	public var workaroundSeekBackward: (() -> Void)?
+
 	
 	/**
 	 Loads an AudioItem into the player and simultaneously downloads the file to disk.
