@@ -35,6 +35,17 @@ public class CachingAudioPlayer: AudioPlayer {
 	// Private download manager for internal use
 	private let downloadManager = AudioDownloadManager.shared
 	
+	// Secondary AVPlayer for crossfade transition
+	private var secondaryPlayer: AVPlayer?
+	private var secondaryPlayerItem: AVPlayerItem?
+	private var localAudioItem: AudioItem?
+	private var isPreloading: Bool = false
+	private var crossfadeTimer: Timer?
+	
+	// Crossfade duration in seconds
+	private let crossfadeDuration: TimeInterval = 0.3
+	private let crossfadeSteps = 10
+	
 	// MARK: - Initialization
 	
 	public override init(nowPlayingInfoController: NowPlayingInfoControllerProtocol = NowPlayingInfoController(),
@@ -44,6 +55,10 @@ public class CachingAudioPlayer: AudioPlayer {
 		
 		// Register for notifications
 		registerForNotifications()
+		
+		// Create secondary player
+		secondaryPlayer = AVPlayer()
+		secondaryPlayer?.volume = 0 // Start with volume at 0
 	}
 	
 	// MARK: - Public Methods
@@ -100,6 +115,7 @@ public class CachingAudioPlayer: AudioPlayer {
 	 */
 	public func cancelDownload() {
 		downloadManager.cancelAllDownloads()
+		cleanupPreloadedResources()
 	}
 	
 	/**
@@ -134,7 +150,30 @@ public class CachingAudioPlayer: AudioPlayer {
 		let wasPlaying = self.playerState == .playing
 		let currentTime = self.currentTime
 		
-		// Create a new AudioItem for the local file
+		// Check if we have a prepared secondary player ready
+		if let secondaryPlayer = self.secondaryPlayer,
+				secondaryPlayer.currentItem?.status == .readyToPlay,
+			 let localItem = self.localAudioItem {
+			
+			print("Using preloaded secondary player for crossfade transition")
+			
+			// Start crossfade transition
+			performCrossfade(fromTime: currentTime)
+			
+			// Update the current item reference
+			self.currentItem = localItem
+			
+			// Update now playing info
+			if (automaticallyUpdateNowPlayingInfo) {
+				loadNowPlayingMetaValues()
+				updateNowPlayingPlaybackValues()
+			}
+			
+			return
+		}
+		
+		// Fall back to the old method if no secondary player is ready
+		print("Falling back to standard file switching method")
 		let localItem: DefaultAudioItemInitialTime = createLocalAudioItem(from: item, localURL: localURL) as! DefaultAudioItemInitialTime
 		localItem.initialTime = currentTime
 		
@@ -144,25 +183,154 @@ public class CachingAudioPlayer: AudioPlayer {
 			// Activate the audio session
 			if !AudioSessionController.shared.audioSessionIsActive {
 				try AudioSessionController.shared.activateSession()
-				// TODO: What error could this throw that should be handled?
 			}
 			
 			load(item: localItem, playWhenReady: wasPlaying)
 		} catch {
-			// Would be nice to catch this as a specific error, but APError.LoadError... is generating a compile error as it's an internal reference
-			// From the code, looks like this is the only error that will be thrown, so safe to assume for now it's a bad URL
-			// This error also only seems to throw if an empty string is provided
 			print("ERROR!!! Failed to load local file: \(error.localizedDescription)")
 		}
 	}
 	
 	// MARK: - Private Methods
 	
+	private func performCrossfade(fromTime time: TimeInterval) {
+		guard let mainPlayer = getAVPlayerFromWrapper(),
+					let secondaryPlayer = self.secondaryPlayer else {
+			return
+		}
+		
+		// Ensure main player's volume is at full and secondary is muted
+		mainPlayer.volume = 1.0
+		secondaryPlayer.volume = 0.0
+		
+		// Start playing the secondary player at the specified time
+		secondaryPlayer.play()
+		
+		// Cancel any existing crossfade
+		crossfadeTimer?.invalidate()
+		
+		// Calculate volume adjustment per step
+		let volumeStepSize: Float = 1.0 / Float(crossfadeSteps)
+		let stepDuration = crossfadeDuration / Double(crossfadeSteps)
+		var currentStep = 0
+		
+		// Create and start crossfade timer
+		crossfadeTimer = Timer.scheduledTimer(withTimeInterval: stepDuration, repeats: true) { [weak self] timer in
+			guard let self = self else {
+				timer.invalidate()
+				return
+			}
+			
+			currentStep += 1
+			
+			// Adjust volumes gradually
+			mainPlayer.volume = 1.0 - (volumeStepSize * Float(currentStep))
+			secondaryPlayer.volume = volumeStepSize * Float(currentStep)
+			
+			// Log progress for debugging
+			print("Crossfade step \(currentStep)/\(self.crossfadeSteps): main=\(mainPlayer.volume), secondary=\(secondaryPlayer.volume)")
+			
+			// When crossfade is complete
+			if currentStep >= self.crossfadeSteps {
+				timer.invalidate()
+				
+				// Stop the main player
+				mainPlayer.pause()
+				
+				// Swap the players - make the secondary player the main player
+				if let secondaryItem = secondaryPlayer.currentItem {
+					// Ensure volumes are at correct final values
+					secondaryPlayer.volume = 1.0
+					
+					mainPlayer.replaceCurrentItem(with: secondaryItem)
+					mainPlayer.play()
+					
+					// Clean up secondary player
+					secondaryPlayer.replaceCurrentItem(with: nil)
+					self.secondaryPlayerItem = nil
+					self.cleanupPreloadedResources()
+					
+					print("Crossfade complete - switched to local file player")
+				}
+			}
+		}
+	}
+	
+	private func preloadLocalFile(_ localURL: URL, atTime time: TimeInterval) {
+		// Check if we're already preloading or if the file doesn't exist
+		guard !isPreloading,
+					FileManager.default.fileExists(atPath: localURL.path),
+					let item = currentItem else {
+			return
+		}
+		
+		// Set flag to prevent multiple preloads
+		isPreloading = true
+		print("Starting to preload local file")
+		
+		// Create the local audio item
+		let localItem = createLocalAudioItem(from: item, localURL: localURL) as! DefaultAudioItemInitialTime
+		localItem.initialTime = time
+		self.localAudioItem = localItem
+		
+		// Create and prepare the AVPlayerItem
+		let fileURL = URL(fileURLWithPath: localItem.getSourceUrl())
+		
+		let asset = AVURLAsset(url: fileURL)
+		let playerItem = AVPlayerItem(asset: asset)
+		secondaryPlayerItem = playerItem
+		
+		// Set the initial playback time
+		let cmTime = CMTime(seconds: time, preferredTimescale: 1000)
+		playerItem.seek(to: cmTime) { [weak self] success in
+			if success {
+				print("Successfully preloaded local file and seeked to position: \(time)")
+				
+				if let secondaryPlayer = self?.secondaryPlayer {
+					// Load the item into the secondary player
+					secondaryPlayer.replaceCurrentItem(with: playerItem)
+					secondaryPlayer.volume = 0.0 // Start muted
+					
+					// Match the rate with the main player
+					if let mainPlayer = self?.getAVPlayerFromWrapper() {
+						secondaryPlayer.rate = mainPlayer.rate
+					}
+					
+					print("Secondary player prepared and ready for transition")
+				}
+			}
+		}
+	}
+	
+	private func getAVPlayerFromWrapper() -> AVPlayer? {
+		// This is a bit of a hack to access the AVPlayer from the wrapper
+		// We're using private API access, which might break if the base library changes
+		if let wrapperValue = Mirror(reflecting: self.wrapper).children.first(where: { $0.label == "avPlayer" })?.value {
+			return wrapperValue as? AVPlayer
+		}
+		return nil
+	}
+	
+	private func cleanupPreloadedResources() {
+		crossfadeTimer?.invalidate()
+		crossfadeTimer = nil
+		secondaryPlayerItem = nil
+		localAudioItem = nil
+		isPreloading = false
+	}
+	
 	private func registerForNotifications() {
 		NotificationCenter.default.addObserver(
 			self,
 			selector: #selector(handleDownloadCompleted),
 			name: .audioDownloadCompleted,
+			object: nil
+		)
+		
+		NotificationCenter.default.addObserver(
+			self,
+			selector: #selector(handleDownloadProgress),
+			name: .audioDownloadProgress,
 			object: nil
 		)
 	}
@@ -178,9 +346,30 @@ public class CachingAudioPlayer: AudioPlayer {
 		
 		// Check if this is the currently playing item
 		if let currentItem = currentItem,
-				currentItem.getSourceUrl() == originalURL.absoluteString {
+			 currentItem.getSourceUrl() == originalURL.absoluteString {
 			// Switch to local file
 			switchToLocalFile(localURL)
+		}
+	}
+	
+	@objc private func handleDownloadProgress(notification: Notification) {
+		guard let userInfo = notification.userInfo,
+					let originalURL = userInfo[AudioDownloadUserInfoKey.originalURL.rawValue] as? URL,
+					let progress = userInfo[AudioDownloadUserInfoKey.progress.rawValue] as? Float,
+					let localURL = userInfo[AudioDownloadUserInfoKey.localURL.rawValue] as? URL else {
+			return
+		}
+		
+		// Check if this is the currently playing item
+		guard let currentItem = currentItem,
+					currentItem.getSourceUrl() == originalURL.absoluteString else {
+			return
+		}
+		
+		// If we're close to completion, preload the file
+		if progress > 0.80 && !isPreloading {
+			print("Download at \(progress * 100)%. Starting preload...")
+			preloadLocalFile(localURL, atTime: self.currentTime)
 		}
 	}
 	
@@ -210,6 +399,8 @@ public class CachingAudioPlayer: AudioPlayer {
 	
 	deinit {
 		NotificationCenter.default.removeObserver(self)
+		cleanupPreloadedResources()
+		secondaryPlayer = nil
 	}
 }
 
@@ -315,7 +506,8 @@ private class AudioDownloadManager: NSObject, URLSessionDownloadDelegate {
 	private func notifyDownloadProgress(originalURL: URL, progress: Float, audioItem: AudioItem?) {
 		var userInfo: [String: Any] = [
 			AudioDownloadUserInfoKey.originalURL.rawValue: originalURL,
-			AudioDownloadUserInfoKey.progress.rawValue: progress
+			AudioDownloadUserInfoKey.progress.rawValue: progress,
+			AudioDownloadUserInfoKey.localURL.rawValue: activeDownloads[originalURL]?.destinationURL as Any
 		]
 		
 		if let audioItem = audioItem {

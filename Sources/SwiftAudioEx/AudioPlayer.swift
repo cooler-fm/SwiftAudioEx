@@ -18,7 +18,7 @@ public class AudioPlayer: AVPlayerWrapperDelegate {
     public let remoteCommandController: RemoteCommandController
     public let event = EventHolder()
 
-    private(set) var currentItem: AudioItem?
+    public var currentItem: AudioItem?
 
     /**
      Set this to false to disable automatic updating of now playing info for control center and lock screen.
